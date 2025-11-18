@@ -1,11 +1,18 @@
 # LoRA Stack Explorer
 
-A comprehensive ComfyUI custom node that combines dynamic UI capabilities, FLUX LoRA preset functionality, and sophisticated group-based random strength distribution.
+A comprehensive ComfyUI custom node package that includes:
+1. **Advanced LoRA Stacker**: Dynamic UI with LoRA preset functionality and sophisticated group-based random strength distribution
+2. **Text Concatenator**: A dynamic text concatenation node with infinite inputs
 
-## Features
+## Included Nodes
 
-### 🎯 Core Functionality
+### 1. Advanced LoRA Stacker
 
+**Category**: `loaders`
+
+A comprehensive LoRA management node with dynamic UI, preset functionality, and group-based random strength distribution.
+
+#### Key Features:
 - **Dynamic UI**: Expandable interface with "Add LoRA" and "Add Group" buttons
 - **LoRA Presets**: Five preset types targeting specific model blocks
 - **Group Management**: Organize LoRAs into groups with shared max strengths
@@ -13,6 +20,18 @@ A comprehensive ComfyUI custom node that combines dynamic UI capabilities, FLUX 
 - **Individual Randomization**: Per-LoRA randomization controls for ungrouped LoRAs
 - **Lock System**: Lock specific strength values while randomizing others
 - **Collapsible Groups**: Expand/collapse groups to manage UI space
+
+### 2. Text Concatenator
+
+**Category**: `text`
+
+A dynamic text concatenation node with infinite auto-revealing inputs, perfect for combining multiple text sources.
+
+#### Key Features:
+- **Infinite Dynamic Inputs**: New input slots appear automatically as you connect
+- **Custom Delimiter**: Multiline support with newlines and special characters
+- **Dual Outputs**: Combined text and indexed text selection
+- **0-Based Indexing**: Select any specific input by index
 
 ### 📋 LoRA Preset Types
 
@@ -341,7 +360,114 @@ Inspired by:
 - **Bob's LoRA Loader (FLUX)**: Preset functionality
 - **Random Partitioning Algorithm**: Stick-breaking method
 
+---
+
+## Text Concatenator Node
+
+### Overview
+
+The Text Concatenator node provides dynamic text concatenation with an infinite number of inputs. As you connect text inputs, new input slots automatically appear, making it perfect for combining multiple text sources.
+
+### Features
+
+- **Infinite Dynamic Inputs**: Automatically reveals new input connections as you connect text sources
+- **Custom Delimiter**: Multiline text field supporting newlines and special characters (not just a primitive string)
+- **Combined Output**: Concatenates all inputs with the specified delimiter
+- **Indexed Output**: Select any specific input by index for individual output
+- **0-Based Indexing**: Index parameter uses 0-based indexing (0 = first input, 1 = second, etc.)
+
+### Inputs
+
+1. **delimiter** (STRING, multiline):
+   - Default: ", " (comma-space)
+   - Supports multi-line delimiters and newline characters
+   - Can be set to "\n" for line-by-line concatenation
+   - Can use custom separators like " | " or " -> "
+
+2. **index** (INT):
+   - Default: 0
+   - Range: 0-999
+   - Selects which input to output individually (0-based)
+   - Returns empty string if index is out of range
+
+3. **text (dynamic)**: Infinite text inputs
+   - First input always visible
+   - New inputs appear automatically when previous ones are connected
+   - Disconnecting an input removes it automatically
+   - Inputs are numbered: text_1, text_2, text_3, etc.
+
+### Outputs
+
+1. **combined_text** (STRING):
+   - All connected inputs concatenated with the delimiter
+   - Empty string if no inputs are connected
+
+2. **indexed_text** (STRING):
+   - The text from the input at the specified index
+   - Empty string if index is out of range or no inputs connected
+
+### Usage Examples
+
+#### Example 1: Simple List Concatenation
+```
+Inputs:
+  - text_1: "Apple"
+  - text_2: "Banana"
+  - text_3: "Cherry"
+  - delimiter: ", "
+  - index: 0
+
+Outputs:
+  - combined_text: "Apple, Banana, Cherry"
+  - indexed_text: "Apple"
+```
+
+#### Example 2: Multi-line Text
+```
+Inputs:
+  - text_1: "First paragraph"
+  - text_2: "Second paragraph"
+  - text_3: "Third paragraph"
+  - delimiter: "\n\n"  (double newline)
+  - index: 1
+
+Outputs:
+  - combined_text: "First paragraph\n\nSecond paragraph\n\nThird paragraph"
+  - indexed_text: "Second paragraph"
+```
+
+#### Example 3: Prompt Building
+```
+Inputs:
+  - text_1: "masterpiece, best quality"
+  - text_2: "1girl, standing"
+  - text_3: "outdoor, sunlight"
+  - text_4: "detailed background"
+  - delimiter: ", "
+  - index: 2
+
+Outputs:
+  - combined_text: "masterpiece, best quality, 1girl, standing, outdoor, sunlight, detailed background"
+  - indexed_text: "outdoor, sunlight"
+```
+
+### Use Cases
+
+1. **Prompt Building**: Combine multiple prompt segments with proper delimiters
+2. **Text Processing Pipelines**: Merge outputs from multiple text generation nodes
+3. **Multi-source Concatenation**: Combine text from various sources in a workflow
+4. **Conditional Text Selection**: Use the indexed output to select specific segments
+5. **List Generation**: Create comma-separated or newline-separated lists dynamically
+
+---
+
 ## Changelog
+
+### v1.2.0 (Text Concatenator Node)
+- **Added**: New Text Concatenator node with dynamic infinite inputs
+- **Added**: Multiline delimiter support for complex text separation
+- **Added**: Index-based text selection for multi-faceted workflows
+- **Added**: Auto-revealing input mechanism inspired by anything-everywhere pattern
 
 ### v1.1.0 (State Persistence Fix)
 - **Fixed**: Node state now persists across ComfyUI server restarts
