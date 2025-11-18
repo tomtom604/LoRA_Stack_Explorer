@@ -717,10 +717,18 @@ app.registerExtension({
          * Update stack_data hidden widget with current configuration
          */
         nodeType.prototype.updateStackData = function() {
-            if (!this.stackDataWidget) return;
+            if (!this.stackDataWidget) {
+                console.log("updateStackData: no stackDataWidget");
+                return;
+            }
             
             // Skip update during restoration to prevent loops
-            if (this.isRestoring) return;
+            if (this.isRestoring) {
+                console.log("updateStackData: skipping (isRestoring=true)");
+                return;
+            }
+            
+            console.log("updateStackData: updating with", this.groups.length, "groups and", this.loras.length, "loras");
             
             const data = {
                 groups: this.groups.map(g => ({
@@ -759,7 +767,9 @@ app.registerExtension({
                 })
             };
             
-            this.stackDataWidget.value = JSON.stringify(data);
+            const jsonString = JSON.stringify(data);
+            this.stackDataWidget.value = jsonString;
+            console.log("updateStackData: set value to", jsonString.substring(0, 100) + "...");
         };
         
         /**
