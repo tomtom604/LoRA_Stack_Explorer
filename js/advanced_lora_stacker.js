@@ -82,17 +82,30 @@ app.registerExtension({
                 }
             );
             
-            // Find stack_data widget (hidden)
-            console.log("Looking for stack_data widget. All widgets:", this.widgets.map(w => w.name));
+            // Find or create stack_data widget (hidden)
+            console.log("=== Widget Discovery ===");
+            console.log("All widgets:", this.widgets.map(w => ({name: w.name, type: w.type, value: typeof w.value === 'string' ? w.value.substring(0, 50) + '...' : w.value})));
+            
             this.stackDataWidget = this.widgets.find(w => w.name === "stack_data");
+            
             if (!this.stackDataWidget) {
-                console.log("stack_data widget not found, creating it");
-                // Create hidden widget if not exists
+                console.log("stack_data widget NOT found, creating it manually");
+                // ComfyUI should create this widget from INPUT_TYPES, but if it doesn't, create it
                 this.stackDataWidget = this.addWidget("text", "stack_data", "", () => {});
                 this.stackDataWidget.type = "hidden";
                 this.stackDataWidget.computeSize = () => [0, -4]; // Hide completely
+                // Move to the beginning of widgets array to match INPUT_TYPES order (after seed)
+                const idx = this.widgets.indexOf(this.stackDataWidget);
+                if (idx > 1) {
+                    this.widgets.splice(idx, 1);
+                    this.widgets.splice(1, 0, this.stackDataWidget);
+                }
+                console.log("Created and positioned stack_data widget at index 1");
             } else {
-                console.log("Found stack_data widget with value:", this.stackDataWidget.value ? this.stackDataWidget.value.substring(0, 100) + "..." : "empty");
+                const idx = this.widgets.indexOf(this.stackDataWidget);
+                console.log("Found existing stack_data widget at index:", idx);
+                console.log("  Current value:", this.stackDataWidget.value ? this.stackDataWidget.value.substring(0, 100) + "..." : "(empty)");
+                console.log("  Widget type:", this.stackDataWidget.type);
             }
             
             // Override serialize to save state
