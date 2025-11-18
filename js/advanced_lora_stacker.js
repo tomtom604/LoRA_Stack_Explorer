@@ -109,19 +109,34 @@ app.registerExtension({
             // Override configure to restore state when loading workflow
             const originalConfigure = this.configure;
             this.configure = function(info) {
-                console.log("configure called for AdvancedLoraStacker");
+                console.log("configure called for AdvancedLoraStacker", info);
                 
                 if (originalConfigure) {
                     originalConfigure.apply(this, arguments);
                 }
                 
                 // Restore state from stack_data after a brief delay to ensure widgets are ready
-                // Use a slightly longer delay to ensure all widgets are fully initialized
+                // Use multiple attempts with increasing delays to handle different timing scenarios
                 setTimeout(() => {
-                    console.log("Attempting restoration after configure");
+                    console.log("Attempting restoration after configure (50ms)");
                     this.restoreFromStackData();
                 }, 50);
+                
+                // Backup attempt in case the first one fails
+                setTimeout(() => {
+                    console.log("Backup restoration attempt (200ms)");
+                    this.restoreFromStackData();
+                }, 200);
             };
+            
+            // Also try to restore immediately if widget already has value (for some edge cases)
+            setTimeout(() => {
+                if (this.stackDataWidget && this.stackDataWidget.value && this.stackDataWidget.value !== "" && 
+                    this.groups.length === 0 && this.loras.length === 0) {
+                    console.log("Initial restoration attempt from onNodeCreated");
+                    this.restoreFromStackData();
+                }
+            }, 100);
             
             // Custom draw for visual styling
             const originalOnDrawForeground = this.onDrawForeground;
@@ -767,6 +782,14 @@ app.registerExtension({
                 console.log("No groups or loras to restore");
                 return;
             }
+            
+            // Check if we've already restored this exact state (to prevent duplicate restoration)
+            const currentStateJson = JSON.stringify({groups, loras});
+            if (this._lastRestoredState === currentStateJson) {
+                console.log("State already restored, skipping");
+                return;
+            }
+            this._lastRestoredState = currentStateJson;
             
             // If we already have groups or loras, clear them first to prevent duplicates
             if (this.groups.length > 0 || this.loras.length > 0) {
