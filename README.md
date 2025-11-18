@@ -1,4 +1,4 @@
-# Advanced LoRA Stacker
+# LoRA Stack Explorer
 
 A comprehensive ComfyUI custom node that combines dynamic UI capabilities, FLUX LoRA preset functionality, and sophisticated group-based random strength distribution.
 
