@@ -312,6 +312,20 @@ Ungrouped LoRAs
 - Check that unlocked LoRAs exist in group
 - Review console output for assigned values
 
+### Node State Not Persisting
+
+**This issue has been fixed!** The node now properly saves and restores its state when:
+- Saving and loading workflows
+- Restarting ComfyUI server
+- Switching between workflows
+
+The node state (groups, LoRAs, and all settings) is automatically saved in the workflow JSON file. When you load a workflow, the node will recreate all groups and LoRAs exactly as you configured them.
+
+If you're still experiencing issues:
+- Make sure you're using the latest version of the node
+- Check browser console for any error messages during restoration
+- Verify your workflow file contains the `stack_data` field in the node's `widgets_values`
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
@@ -328,6 +342,13 @@ Inspired by:
 - **Random Partitioning Algorithm**: Stick-breaking method
 
 ## Changelog
+
+### v1.1.0 (State Persistence Fix)
+- **Fixed**: Node state now persists across ComfyUI server restarts
+- **Fixed**: Groups and LoRAs are properly restored when loading workflows
+- **Added**: Automatic state restoration from workflow JSON
+- **Added**: Console logging for debugging state restoration
+- **Added**: Example workflow demonstrating state persistence
 
 ### v1.0.0 (Initial Release)
 - Dynamic expandable UI with groups

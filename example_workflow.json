@@ -1,0 +1,117 @@
+{
+  "last_node_id": 3,
+  "last_link_id": 4,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CheckpointLoaderSimple",
+      "pos": [0, 0],
+      "size": [315, 98],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [1],
+          "slot_index": 0
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [2],
+          "slot_index": 1
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "v1-5-pruned-emaonly.safetensors"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "AdvancedLoraStacker",
+      "pos": [350, 0],
+      "size": [450, 140],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 1
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [3],
+          "slot_index": 0
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [4],
+          "slot_index": 1
+        },
+        {
+          "name": "info",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AdvancedLoraStacker"
+      },
+      "widgets_values": [
+        12345,
+        "{\"groups\":[{\"id\":1,\"index\":1,\"max_model\":1.0,\"max_clip\":1.0}],\"loras\":[{\"id\":1,\"group_id\":1,\"name\":\"example_lora.safetensors\",\"preset\":\"Character\",\"lock_model\":false,\"locked_model_value\":0.0,\"lock_clip\":true,\"locked_clip_value\":0.5},{\"id\":2,\"group_id\":null,\"name\":\"style_lora.safetensors\",\"preset\":\"Style\",\"model_strength\":0.8,\"clip_strength\":0.8,\"random_model\":true,\"min_model\":0.5,\"max_model\":1.0,\"random_clip\":false,\"min_clip\":0.0,\"max_clip\":1.0}]}"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SaveImage",
+      "pos": [850, 0],
+      "size": [315, 270],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "properties": {},
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "MODEL"],
+    [2, 1, 1, 2, 1, "CLIP"],
+    [3, 2, 0, 3, 0, "MODEL"],
+    [4, 2, 1, 3, 1, "CLIP"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
