@@ -84,8 +84,15 @@ app.registerExtension({
             
             // Find or create stack_data widget (hidden)
             console.log("=== Widget Discovery ===");
-            console.log("All widgets:", this.widgets.map(w => ({name: w.name, type: w.type, value: typeof w.value === 'string' ? w.value.substring(0, 50) + '...' : w.value})));
+            console.log("Total widgets:", this.widgets.length);
+            console.log("All widgets:", this.widgets.map((w, idx) => ({
+                index: idx,
+                name: w.name,
+                type: w.type,
+                value: typeof w.value === 'string' ? (w.value.length > 50 ? w.value.substring(0, 50) + '...' : w.value) : w.value
+            })));
             
+            // Try to find the stack_data widget - it might be created by ComfyUI from INPUT_TYPES
             this.stackDataWidget = this.widgets.find(w => w.name === "stack_data");
             
             if (!this.stackDataWidget) {
@@ -122,11 +129,15 @@ app.registerExtension({
             // Override configure to restore state when loading workflow
             const originalConfigure = this.configure;
             this.configure = function(info) {
-                console.log("configure called for AdvancedLoraStacker", info);
+                console.log("=== Configure Called ===");
+                console.log("info.widgets_values:", info.widgets_values);
+                console.log("Current widgets before configure:", this.widgets.map((w, idx) => ({index: idx, name: w.name, value: w.value})));
                 
                 if (originalConfigure) {
                     originalConfigure.apply(this, arguments);
                 }
+                
+                console.log("Current widgets after configure:", this.widgets.map((w, idx) => ({index: idx, name: w.name, value: typeof w.value === 'string' ? w.value.substring(0, 50) + '...' : w.value})));
                 
                 // Restore state from stack_data after a brief delay to ensure widgets are ready
                 // Use multiple attempts with increasing delays to handle different timing scenarios
