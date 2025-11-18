@@ -54,6 +54,7 @@ app.registerExtension({
             this.nextGroupId = 1;
             this.nextLoraId = 1;
             this.collapsedGroups = new Set();
+            this.isRestoring = false; // Flag to prevent loops during restoration
             
             // Set initial size
             this.setSize([450, 140]);
@@ -82,33 +83,44 @@ app.registerExtension({
             );
             
             // Find stack_data widget (hidden)
+            console.log("Looking for stack_data widget. All widgets:", this.widgets.map(w => w.name));
             this.stackDataWidget = this.widgets.find(w => w.name === "stack_data");
             if (!this.stackDataWidget) {
+                console.log("stack_data widget not found, creating it");
                 // Create hidden widget if not exists
                 this.stackDataWidget = this.addWidget("text", "stack_data", "", () => {});
                 this.stackDataWidget.type = "hidden";
                 this.stackDataWidget.computeSize = () => [0, -4]; // Hide completely
+            } else {
+                console.log("Found stack_data widget with value:", this.stackDataWidget.value ? this.stackDataWidget.value.substring(0, 100) + "..." : "empty");
             }
             
             // Override serialize to save state
             const originalSerialize = this.serialize;
             this.serialize = function() {
-                const data = originalSerialize ? originalSerialize.apply(this) : {};
+                console.log("serialize called for AdvancedLoraStacker");
+                // Ensure stack_data is up to date before serialization
                 this.updateStackData();
+                const data = originalSerialize ? originalSerialize.apply(this) : {};
+                console.log("Serialized with stack_data:", this.stackDataWidget ? this.stackDataWidget.value.substring(0, 100) + "..." : "no widget");
                 return data;
             };
             
             // Override configure to restore state when loading workflow
             const originalConfigure = this.configure;
             this.configure = function(info) {
+                console.log("configure called for AdvancedLoraStacker");
+                
                 if (originalConfigure) {
                     originalConfigure.apply(this, arguments);
                 }
                 
                 // Restore state from stack_data after a brief delay to ensure widgets are ready
+                // Use a slightly longer delay to ensure all widgets are fully initialized
                 setTimeout(() => {
+                    console.log("Attempting restoration after configure");
                     this.restoreFromStackData();
-                }, 10);
+                }, 50);
             };
             
             // Custom draw for visual styling
@@ -679,6 +691,9 @@ app.registerExtension({
         nodeType.prototype.updateStackData = function() {
             if (!this.stackDataWidget) return;
             
+            // Skip update during restoration to prevent loops
+            if (this.isRestoring) return;
+            
             const data = {
                 groups: this.groups.map(g => ({
                     id: g.id,
@@ -723,14 +738,19 @@ app.registerExtension({
          * Restore node state from stack_data hidden widget
          */
         nodeType.prototype.restoreFromStackData = function() {
-            if (!this.stackDataWidget || !this.stackDataWidget.value || this.stackDataWidget.value === "") {
+            console.log("restoreFromStackData called");
+            
+            if (!this.stackDataWidget) {
+                console.log("No stackDataWidget found");
                 return;
             }
             
-            // If we already have groups or loras, we've already been restored
-            if (this.groups.length > 0 || this.loras.length > 0) {
+            if (!this.stackDataWidget.value || this.stackDataWidget.value === "") {
+                console.log("stackDataWidget has no value");
                 return;
             }
+            
+            console.log("stackDataWidget.value:", this.stackDataWidget.value.substring(0, 100) + "...");
             
             let data;
             try {
@@ -744,10 +764,26 @@ app.registerExtension({
             const loras = data.loras || [];
             
             if (groups.length === 0 && loras.length === 0) {
+                console.log("No groups or loras to restore");
                 return;
             }
             
+            // If we already have groups or loras, clear them first to prevent duplicates
+            if (this.groups.length > 0 || this.loras.length > 0) {
+                console.log("Clearing existing state before restoration");
+                // Clear existing groups and loras
+                while (this.groups.length > 0) {
+                    this.removeGroup(this.groups[0].id);
+                }
+                while (this.loras.length > 0) {
+                    this.removeLora(this.loras[0].id, true);
+                }
+            }
+            
             console.log("Restoring Advanced LoRA Stacker state:", groups.length, "groups,", loras.length, "loras");
+            
+            // Set restoration flag to prevent updateStackData from being called during restoration
+            this.isRestoring = true;
             
             // First, restore all groups
             for (const groupData of groups) {
@@ -888,7 +924,10 @@ app.registerExtension({
                 }
             }
             
-            // Update the stack data to sync IDs
+            // Clear restoration flag
+            this.isRestoring = false;
+            
+            // Update the stack data to sync IDs (now that restoration is complete)
             this.updateStackData();
             
             // Adjust node size
