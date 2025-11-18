@@ -98,6 +98,19 @@ app.registerExtension({
                 return data;
             };
             
+            // Override configure to restore state when loading workflow
+            const originalConfigure = this.configure;
+            this.configure = function(info) {
+                if (originalConfigure) {
+                    originalConfigure.apply(this, arguments);
+                }
+                
+                // Restore state from stack_data after a brief delay to ensure widgets are ready
+                setTimeout(() => {
+                    this.restoreFromStackData();
+                }, 10);
+            };
+            
             // Custom draw for visual styling
             const originalOnDrawForeground = this.onDrawForeground;
             this.onDrawForeground = function(ctx) {
@@ -704,6 +717,184 @@ app.registerExtension({
             };
             
             this.stackDataWidget.value = JSON.stringify(data);
+        };
+        
+        /**
+         * Restore node state from stack_data hidden widget
+         */
+        nodeType.prototype.restoreFromStackData = function() {
+            if (!this.stackDataWidget || !this.stackDataWidget.value || this.stackDataWidget.value === "") {
+                return;
+            }
+            
+            // If we already have groups or loras, we've already been restored
+            if (this.groups.length > 0 || this.loras.length > 0) {
+                return;
+            }
+            
+            let data;
+            try {
+                data = JSON.parse(this.stackDataWidget.value);
+            } catch (error) {
+                console.error("Failed to parse stack_data:", error);
+                return;
+            }
+            
+            const groups = data.groups || [];
+            const loras = data.loras || [];
+            
+            if (groups.length === 0 && loras.length === 0) {
+                return;
+            }
+            
+            console.log("Restoring Advanced LoRA Stacker state:", groups.length, "groups,", loras.length, "loras");
+            
+            // First, restore all groups
+            for (const groupData of groups) {
+                this.addGroup();
+                const group = this.groups[this.groups.length - 1];
+                
+                // Update group settings
+                group.max_model = groupData.max_model;
+                group.max_clip = groupData.max_clip;
+                
+                // Update widget values
+                const maxModelWidget = group.widgets.find(w => w.name === "  Max MODEL");
+                if (maxModelWidget) {
+                    maxModelWidget.value = groupData.max_model;
+                }
+                
+                const maxClipWidget = group.widgets.find(w => w.name === "  Max CLIP");
+                if (maxClipWidget) {
+                    maxClipWidget.value = groupData.max_clip;
+                }
+            }
+            
+            // Then, restore all LoRAs
+            for (const loraData of loras) {
+                // Find the group if this is a grouped LoRA
+                let targetGroupId = null;
+                if (loraData.group_id !== null && loraData.group_id !== undefined) {
+                    // Match by group ID from data
+                    const groupIndex = groups.findIndex(g => g.id === loraData.group_id);
+                    if (groupIndex !== -1 && this.groups[groupIndex]) {
+                        targetGroupId = this.groups[groupIndex].id;
+                    }
+                }
+                
+                this.addLora(targetGroupId);
+                const lora = this.loras[this.loras.length - 1];
+                
+                // Update LoRA settings
+                lora.name = loraData.name;
+                lora.preset = loraData.preset;
+                
+                // Update widget values
+                const nameWidget = lora.widgets.find(w => w.name === (targetGroupId ? "    LoRA" : "LoRA"));
+                if (nameWidget) {
+                    nameWidget.value = loraData.name;
+                }
+                
+                const presetWidget = lora.widgets.find(w => w.name === (targetGroupId ? "    Type" : "Type"));
+                if (presetWidget) {
+                    presetWidget.value = loraData.preset;
+                }
+                
+                if (targetGroupId !== null) {
+                    // Grouped LoRA - restore lock settings
+                    lora.lock_model = loraData.lock_model || false;
+                    lora.locked_model_value = loraData.locked_model_value || 0.0;
+                    lora.lock_clip = loraData.lock_clip || false;
+                    lora.locked_clip_value = loraData.locked_clip_value || 0.0;
+                    
+                    const lockModelWidget = lora.widgets.find(w => w.name === "    🔒 MODEL");
+                    const lockedModelValueWidget = lora.widgets.find(w => w.name === "      Value" && w === lora.widgets[lora.widgets.indexOf(lockModelWidget) + 1]);
+                    
+                    if (lockModelWidget) {
+                        lockModelWidget.value = lora.lock_model;
+                        if (lora.lock_model && lockedModelValueWidget) {
+                            lockedModelValueWidget.computeSize = undefined;
+                            lockedModelValueWidget.value = lora.locked_model_value;
+                        }
+                    }
+                    
+                    const lockClipWidget = lora.widgets.find(w => w.name === "    🔒 CLIP");
+                    const lockedClipValueWidget = lora.widgets.find(w => w.name === "      Value" && w === lora.widgets[lora.widgets.indexOf(lockClipWidget) + 1]);
+                    
+                    if (lockClipWidget) {
+                        lockClipWidget.value = lora.lock_clip;
+                        if (lora.lock_clip && lockedClipValueWidget) {
+                            lockedClipValueWidget.computeSize = undefined;
+                            lockedClipValueWidget.value = lora.locked_clip_value;
+                        }
+                    }
+                } else {
+                    // Ungrouped LoRA - restore randomization settings
+                    lora.model_strength = loraData.model_strength || 1.0;
+                    lora.clip_strength = loraData.clip_strength || 1.0;
+                    lora.random_model = loraData.random_model || false;
+                    lora.min_model = loraData.min_model || 0.0;
+                    lora.max_model = loraData.max_model || 1.0;
+                    lora.random_clip = loraData.random_clip || false;
+                    lora.min_clip = loraData.min_clip || 0.0;
+                    lora.max_clip = loraData.max_clip || 1.0;
+                    
+                    // Update widget values
+                    const modelStrWidget = lora.widgets.find(w => w.name === "MODEL Str");
+                    if (modelStrWidget) {
+                        modelStrWidget.value = lora.model_strength;
+                    }
+                    
+                    const randomModelWidget = lora.widgets.find(w => w.name === "  🎲 Random" && lora.widgets.indexOf(w) < 8);
+                    const minModelWidget = lora.widgets.find(w => w.name === "    Min" && lora.widgets.indexOf(w) < 8);
+                    const maxModelWidget = lora.widgets.find(w => w.name === "    Max" && lora.widgets.indexOf(w) < 8);
+                    
+                    if (randomModelWidget) {
+                        randomModelWidget.value = lora.random_model;
+                        if (lora.random_model) {
+                            if (minModelWidget) {
+                                minModelWidget.computeSize = undefined;
+                                minModelWidget.value = lora.min_model;
+                            }
+                            if (maxModelWidget) {
+                                maxModelWidget.computeSize = undefined;
+                                maxModelWidget.value = lora.max_model;
+                            }
+                        }
+                    }
+                    
+                    const clipStrWidget = lora.widgets.find(w => w.name === "CLIP Str");
+                    if (clipStrWidget) {
+                        clipStrWidget.value = lora.clip_strength;
+                    }
+                    
+                    const randomClipWidget = lora.widgets.find(w => w.name === "  🎲 Random" && lora.widgets.indexOf(w) > 8);
+                    const minClipWidget = lora.widgets.find(w => w.name === "    Min" && lora.widgets.indexOf(w) > 8);
+                    const maxClipWidget = lora.widgets.find(w => w.name === "    Max" && lora.widgets.indexOf(w) > 8);
+                    
+                    if (randomClipWidget) {
+                        randomClipWidget.value = lora.random_clip;
+                        if (lora.random_clip) {
+                            if (minClipWidget) {
+                                minClipWidget.computeSize = undefined;
+                                minClipWidget.value = lora.min_clip;
+                            }
+                            if (maxClipWidget) {
+                                maxClipWidget.computeSize = undefined;
+                                maxClipWidget.value = lora.max_clip;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Update the stack data to sync IDs
+            this.updateStackData();
+            
+            // Adjust node size
+            this.setSize(this.computeSize());
+            
+            console.log("Advanced LoRA Stacker state restored successfully");
         };
         
         /**
