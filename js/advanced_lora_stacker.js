@@ -1,6 +1,6 @@
 /**
- * Advanced LoRA Stacker - JavaScript Frontend
- * Comprehensive UI with groups, presets, and sophisticated controls
+ * Advanced LoRA Stacker - Simplified State Management (v2)
+ * Complete rewrite focusing on reliable state persistence
  */
 
 import { app } from "../../scripts/app.js";
@@ -21,11 +21,8 @@ async function fetchLoraList() {
             const response = await fetch('/object_info/LoraLoader');
             const data = await response.json();
             
-            if (data && data.LoraLoader && data.LoraLoader.input && data.LoraLoader.input.required) {
-                const loraOptions = data.LoraLoader.input.required.lora_name;
-                if (loraOptions && loraOptions[0]) {
-                    availableLoRAs = ["None", ...loraOptions[0]];
-                }
+            if (data?.LoraLoader?.input?.required?.lora_name?.[0]) {
+                availableLoRAs = ["None", ...data.LoraLoader.input.required.lora_name[0]];
             }
         } catch (error) {
             console.error("Failed to fetch LoRA list:", error);
@@ -33,6 +30,36 @@ async function fetchLoraList() {
     })();
     
     return loraListPromise;
+}
+
+/**
+ * Save state to localStorage as backup
+ */
+function saveStateToLocalStorage(nodeId, state) {
+    try {
+        const key = `AdvancedLoraStacker_${nodeId}`;
+        localStorage.setItem(key, JSON.stringify(state));
+        console.log(`[LoRA Stacker] Saved state to localStorage for node ${nodeId}`);
+    } catch (e) {
+        console.error("[LoRA Stacker] Failed to save to localStorage:", e);
+    }
+}
+
+/**
+ * Load state from localStorage
+ */
+function loadStateFromLocalStorage(nodeId) {
+    try {
+        const key = `AdvancedLoraStacker_${nodeId}`;
+        const data = localStorage.getItem(key);
+        if (data) {
+            console.log(`[LoRA Stacker] Loaded state from localStorage for node ${nodeId}`);
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.error("[LoRA Stacker] Failed to load from localStorage:", e);
+    }
+    return null;
 }
 
 app.registerExtension({
@@ -48,232 +75,182 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function() {
             const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
             
-            // Initialize node data
-            this.groups = [];
-            this.loras = [];
+            console.log("[LoRA Stacker] Node created, ID:", this.id);
+            
+            // Initialize state
+            this.loraState = {
+                groups: [],
+                loras: []
+            };
             this.nextGroupId = 1;
             this.nextLoraId = 1;
             this.collapsedGroups = new Set();
-            this.isRestoring = false; // Flag to prevent loops during restoration
             
             // Set initial size
             this.setSize([450, 140]);
-            this.originalSize = [450, 140];
             
-            // Find the seed widget - it should already exist from INPUT_TYPES
-            this.seedWidget = this.widgets.find(w => w.name === "seed");
-            
-            // Create main action buttons at the bottom
-            this.addLoraButton = this.addWidget(
-                "button",
-                "➕ Add LoRA",
-                null,
-                () => {
-                    this.addLora(null);
-                }
-            );
-            
-            this.addGroupButton = this.addWidget(
-                "button",
-                "➕ Add Group",
-                null,
-                () => {
-                    this.addGroup();
-                }
-            );
-            
-            // Find or create stack_data widget (hidden)
-            console.log("=== Widget Discovery ===");
-            console.log("Total widgets:", this.widgets.length);
-            console.log("All widgets:", this.widgets.map((w, idx) => ({
-                index: idx,
-                name: w.name,
-                type: w.type,
-                value: typeof w.value === 'string' ? (w.value.length > 50 ? w.value.substring(0, 50) + '...' : w.value) : w.value
-            })));
-            
-            // Try to find the stack_data widget - it might be created by ComfyUI from INPUT_TYPES
+            // Find or create the stack_data widget (should exist from Python INPUT_TYPES)
             this.stackDataWidget = this.widgets.find(w => w.name === "stack_data");
-            
             if (!this.stackDataWidget) {
-                console.log("stack_data widget NOT found, creating it manually");
-                // ComfyUI should create this widget from INPUT_TYPES, but if it doesn't, create it
-                this.stackDataWidget = this.addWidget("text", "stack_data", "", () => {});
-                this.stackDataWidget.type = "hidden";
-                this.stackDataWidget.computeSize = () => [0, -4]; // Hide completely
-                // Ensure it's marked for serialization
-                this.stackDataWidget.serialize = true;
-                // Move to the beginning of widgets array to match INPUT_TYPES order (after seed)
-                const idx = this.widgets.indexOf(this.stackDataWidget);
-                if (idx > 1) {
-                    this.widgets.splice(idx, 1);
-                    this.widgets.splice(1, 0, this.stackDataWidget);
-                }
-                console.log("Created and positioned stack_data widget at index 1");
-            } else {
-                const idx = this.widgets.indexOf(this.stackDataWidget);
-                console.log("Found existing stack_data widget at index:", idx);
-                console.log("  Current value:", this.stackDataWidget.value ? this.stackDataWidget.value.substring(0, 100) + "..." : "(empty)");
-                console.log("  Widget type:", this.stackDataWidget.type);
-                // Ensure it's marked for serialization
-                this.stackDataWidget.serialize = true;
+                console.log("[LoRA Stacker] Creating stack_data widget");
+                this.stackDataWidget = ComfyWidgets.STRING(this, "stack_data", ["STRING", {default: ""}], app).widget;
             }
             
-            // Override serialize to save state
-            const originalSerialize = this.serialize;
-            this.serialize = function() {
-                console.log("serialize called for AdvancedLoraStacker");
-                // Ensure stack_data is up to date before serialization
-                this.updateStackData();
-                const data = originalSerialize ? originalSerialize.apply(this) : {};
-                console.log("Serialized with stack_data:", this.stackDataWidget ? this.stackDataWidget.value.substring(0, 100) + "..." : "no widget");
-                return data;
+            // Mark as hidden and ensure serialization
+            this.stackDataWidget.type = "converted-widget";
+            this.stackDataWidget.computeSize = () => [0, -4];
+            this.stackDataWidget.serializeValue = () => {
+                return this.stackDataWidget.value;
             };
             
-            // Add onSerialize hook to ensure state is saved
-            this.onSerialize = function(o) {
-                console.log("onSerialize called");
-                this.updateStackData();
+            // Create main action buttons
+            this.addLoraButton = this.addWidget("button", "➕ Add LoRA", null, () => {
+                this.addLora(null);
+            });
+            
+            this.addGroupButton = this.addWidget("button", "➕ Add Group", null, () => {
+                this.addGroup();
+            });
+            
+            // Save state whenever something changes
+            this.saveState = () => {
+                if (this._saving) return; // Prevent recursion
+                this._saving = true;
                 
-                // Ensure stack_data is in widgets_values
-                if (!o.widgets_values) {
-                    o.widgets_values = [];
+                const stateJson = JSON.stringify(this.loraState);
+                this.stackDataWidget.value = stateJson;
+                
+                // Also save to localStorage as backup
+                if (this.id) {
+                    saveStateToLocalStorage(this.id, this.loraState);
                 }
                 
-                // Update the stack_data value in widgets_values
-                const stackDataIndex = this.widgets.findIndex(w => w.name === "stack_data");
-                if (stackDataIndex !== -1 && this.stackDataWidget) {
-                    o.widgets_values[stackDataIndex] = this.stackDataWidget.value;
-                }
-                
-                return o;
+                console.log("[LoRA Stacker] State saved:", stateJson.substring(0, 100) + "...");
+                this._saving = false;
             };
             
-            // Override onConfigure for proper timing (called after widgets are loaded)
-            this.onConfigure = function(info) {
-                console.log("=== onConfigure Called ===");
-                console.log("info.widgets_values:", info.widgets_values);
+            // Load state when node is configured (workflow loaded)
+            const originalConfigure = this.onConfigure;
+            this.onConfigure = (info) => {
+                if (originalConfigure) {
+                    originalConfigure.call(this, info);
+                }
                 
-                // Check if widgets_values exists and has our stack_data
+                console.log("[LoRA Stacker] onConfigure called");
+                
+                // Try to load from widget value first
                 if (info.widgets_values) {
-                    // Find the index of stack_data widget
                     const stackDataIndex = this.widgets.findIndex(w => w.name === "stack_data");
-                    if (stackDataIndex !== -1 && info.widgets_values[stackDataIndex]) {
-                        // Directly set the widget value
-                        this.stackDataWidget.value = info.widgets_values[stackDataIndex];
-                        
-                        console.log("onConfigure: Set stack_data value from widgets_values");
-                        console.log("Value:", this.stackDataWidget.value.substring(0, 100) + "...");
-                        
-                        // Restore immediately with the value we know is correct
-                        // Use requestAnimationFrame to ensure DOM is ready
-                        requestAnimationFrame(() => {
-                            console.log("Restoring from onConfigure via requestAnimationFrame");
-                            this.restoreFromStackData();
-                        });
+                    if (stackDataIndex >= 0 && info.widgets_values[stackDataIndex]) {
+                        const stateJson = info.widgets_values[stackDataIndex];
+                        console.log("[LoRA Stacker] Loading from widgets_values:", stateJson.substring(0, 100) + "...");
+                        this.stackDataWidget.value = stateJson;
                     }
                 }
+                
+                // Restore UI from state
+                this.restoreState();
             };
             
-            // Add onBeforeSerialize hook to update stack data before any serialization
-            this.onBeforeSerialize = function() {
-                console.log("onBeforeSerialize - updating stack data");
-                this.updateStackData();
-            };
-            
-            // Hook into graph serialization to ensure all nodes update before save
-            if (app.graph && !app.graph._loraStackerHooked) {
-                const originalSerialize = app.graph.serialize;
-                app.graph.serialize = function() {
-                    console.log("Graph serialize called - updating all AdvancedLoraStacker nodes");
-                    // Update all AdvancedLoraStacker nodes before serialization
-                    const nodes = this._nodes.filter(n => n.type === "AdvancedLoraStacker");
-                    nodes.forEach(node => {
-                        if (node.updateStackData) {
-                            node.updateStackData();
-                        }
-                    });
-                    
-                    return originalSerialize.apply(this, arguments);
+            // Ensure state is saved before serialization
+            const originalGetWidgetValue = this.widgets[0].serializeValue || (() => this.widgets[0].value);
+            if (this.stackDataWidget) {
+                this.stackDataWidget.serializeValue = () => {
+                    this.saveState();
+                    return this.stackDataWidget.value;
                 };
-                app.graph._loraStackerHooked = true;
             }
-            
-            // Custom draw for visual styling
-            const originalOnDrawForeground = this.onDrawForeground;
-            this.onDrawForeground = function(ctx) {
-                if (originalOnDrawForeground) {
-                    originalOnDrawForeground.apply(this, arguments);
-                }
-                
-                // Draw group containers with rounded corners
-                const widgetY = 40; // Start after title bar
-                let currentY = widgetY;
-                
-                for (const group of this.groups) {
-                    const collapsed = this.collapsedGroups.has(group.id);
-                    
-                    // Calculate container bounds
-                    let groupHeight = 10; // Padding
-                    const groupWidgets = this.getGroupWidgets(group.id);
-                    
-                    for (const widget of groupWidgets) {
-                        if (collapsed && widget.groupWidget && widget !== groupWidgets[0]) {
-                            continue; // Skip collapsed widgets
-                        }
-                        const size = widget.computeSize ? widget.computeSize(this.size[0]) : [0, 30];
-                        if (size[1] > 0) {
-                            groupHeight += size[1] + 4;
-                        }
-                    }
-                    
-                    // Draw rounded container
-                    ctx.fillStyle = "#1a2a3a";
-                    ctx.strokeStyle = "#3a5a7a";
-                    ctx.lineWidth = 2;
-                    
-                    const x = 15;
-                    const y = currentY;
-                    const width = this.size[0] - 30;
-                    const height = groupHeight;
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(x + 6, y);
-                    ctx.lineTo(x + width - 6, y);
-                    ctx.quadraticCurveTo(x + width, y, x + width, y + 6);
-                    ctx.lineTo(x + width, y + height - 6);
-                    ctx.quadraticCurveTo(x + width, y + height, x + width - 6, y + height);
-                    ctx.lineTo(x + 6, y + height);
-                    ctx.quadraticCurveTo(x, y + height, x, y + height - 6);
-                    ctx.lineTo(x, y + 6);
-                    ctx.quadraticCurveTo(x, y, x + 6, y);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-                    
-                    currentY += groupHeight + 10;
-                }
-            };
             
             return r;
         };
         
         /**
-         * Get all widgets belonging to a group (including LoRAs)
+         * Restore the UI from the current state
          */
-        nodeType.prototype.getGroupWidgets = function(groupId) {
-            const group = this.groups.find(g => g.id === groupId);
-            if (!group) return [];
-            
-            const widgets = [...group.widgets];
-            
-            // Add LoRA widgets that belong to this group
-            const groupLoras = this.loras.filter(l => l.group_id === groupId);
-            for (const lora of groupLoras) {
-                widgets.push(...lora.widgets);
+        nodeType.prototype.restoreState = function() {
+            if (!this.stackDataWidget?.value) {
+                console.log("[LoRA Stacker] No state to restore");
+                // Try loading from localStorage
+                const localState = loadStateFromLocalStorage(this.id);
+                if (localState) {
+                    this.loraState = localState;
+                    this.saveState();
+                } else {
+                    return;
+                }
             }
             
-            return widgets;
+            try {
+                const state = JSON.parse(this.stackDataWidget.value);
+                console.log("[LoRA Stacker] Restoring state:", state);
+                
+                // Clear existing UI (except base widgets)
+                this.clearDynamicWidgets();
+                
+                // Update state
+                this.loraState = state;
+                
+                // Rebuild UI from state
+                this.rebuildUI();
+                
+            } catch (e) {
+                console.error("[LoRA Stacker] Failed to restore state:", e);
+            }
+        };
+        
+        /**
+         * Clear all dynamic widgets (groups and loras)
+         */
+        nodeType.prototype.clearDynamicWidgets = function() {
+            // Keep only seed, stack_data, and action buttons
+            const keepWidgets = [
+                this.widgets.find(w => w.name === "seed"),
+                this.stackDataWidget,
+                this.addLoraButton,
+                this.addGroupButton
+            ].filter(w => w); // Filter out undefined
+            
+            // Remove all other widgets
+            const toRemove = this.widgets.filter(w => !keepWidgets.includes(w));
+            for (const widget of toRemove) {
+                const idx = this.widgets.indexOf(widget);
+                if (idx >= 0) {
+                    this.widgets.splice(idx, 1);
+                }
+            }
+        };
+        
+        /**
+         * Rebuild the entire UI from state
+         */
+        nodeType.prototype.rebuildUI = function() {
+            const state = this.loraState;
+            
+            // Reset ID counters
+            this.nextGroupId = 1;
+            this.nextLoraId = 1;
+            
+            // Rebuild groups
+            for (const groupData of state.groups || []) {
+                const groupId = this.nextGroupId++;
+                this.createGroupWidgets(groupId, groupData);
+                
+                // Add loras for this group
+                const groupLoras = (state.loras || []).filter(l => l.group_id === groupData.id);
+                for (const loraData of groupLoras) {
+                    const loraId = this.nextLoraId++;
+                    this.createLoraWidgets(loraId, groupId, loraData);
+                }
+            }
+            
+            // Rebuild ungrouped loras
+            const ungroupedLoras = (state.loras || []).filter(l => !l.group_id);
+            for (const loraData of ungroupedLoras) {
+                const loraId = this.nextLoraId++;
+                this.createLoraWidgets(loraId, null, loraData);
+            }
+            
+            this.setSize(this.computeSize());
         };
         
         /**
@@ -281,794 +258,518 @@ app.registerExtension({
          */
         nodeType.prototype.addGroup = function() {
             const groupId = this.nextGroupId++;
-            const groupIndex = this.groups.length + 1;
+            const groupIndex = this.loraState.groups.length + 1;
             
-            const group = {
+            const groupData = {
                 id: groupId,
                 index: groupIndex,
                 max_model: 1.0,
-                max_clip: 1.0,
-                widgets: []
+                max_clip: 1.0
             };
             
-            // Find insertion index - groups go at the top, before action buttons
-            const seedIdx = this.widgets.indexOf(this.seedWidget);
-            let insertIdx = seedIdx + 1;
+            this.loraState.groups.push(groupData);
+            this.createGroupWidgets(groupId, groupData);
+            this.saveState();
+            this.setSize(this.computeSize());
+        };
+        
+        /**
+         * Create widgets for a group
+         */
+        nodeType.prototype.createGroupWidgets = function(groupId, groupData) {
+            const insertIdx = this.getInsertIndexForGroup(groupId);
             
-            // Insert after last group
-            if (this.groups.length > 0) {
-                const lastGroup = this.groups[this.groups.length - 1];
-                const lastGroupWidgets = this.getGroupWidgets(lastGroup.id);
-                if (lastGroupWidgets.length > 0) {
-                    const lastWidget = lastGroupWidgets[lastGroupWidgets.length - 1];
-                    const widgetIdx = this.widgets.indexOf(lastWidget);
-                    if (widgetIdx !== -1) {
-                        insertIdx = widgetIdx + 1;
+            // Header button (collapse/expand)
+            const collapsed = this.collapsedGroups.has(groupId);
+            const headerWidget = this.insertWidget(insertIdx, "button", 
+                `${collapsed ? '▶' : '▼'} Group ${groupData.index}`, 
+                null, 
+                () => this.toggleGroupCollapse(groupId)
+            );
+            headerWidget._groupId = groupId;
+            headerWidget._isGroupWidget = true;
+            
+            // Remove button
+            const removeBtn = this.insertWidget(insertIdx + 1, "button", "✕ Remove", null, 
+                () => this.removeGroup(groupId)
+            );
+            removeBtn._groupId = groupId;
+            removeBtn._isGroupWidget = true;
+            
+            // Max MODEL strength
+            const maxModelWidget = this.insertWidget(insertIdx + 2, "number", "  Max MODEL", 
+                groupData.max_model, 
+                (v) => {
+                    const group = this.loraState.groups.find(g => g.id === groupId);
+                    if (group) {
+                        group.max_model = v;
+                        this.saveState();
                     }
-                }
-            }
-            
-            // Group header with collapse toggle and remove button
-            const headerWidget = this.addWidget("button", `▼ group_${groupIndex}`, null, () => {
-                this.toggleGroupCollapse(groupId);
-            });
-            headerWidget.groupWidget = true;
-            headerWidget.groupId = groupId;
-            group.widgets.push(headerWidget);
-            
-            // Remove group button (inline with header conceptually)
-            const removeBtn = this.addWidget("button", "✕", null, () => {
-                this.removeGroup(groupId);
-            });
-            removeBtn.groupWidget = true;
-            removeBtn.groupId = groupId;
-            group.widgets.push(removeBtn);
-            
-            // Max Model strength
-            const maxModelWidget = ComfyWidgets.FLOAT(this, "max_model", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-            maxModelWidget.widget.name = `  Max MODEL`;
-            maxModelWidget.widget.value = 1.0;
-            maxModelWidget.widget.groupWidget = true;
-            maxModelWidget.widget.groupId = groupId;
-            maxModelWidget.widget.callback = () => {
-                group.max_model = maxModelWidget.widget.value;
-                this.updateStackData();
-            };
-            group.widgets.push(maxModelWidget.widget);
+                },
+                { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+            );
+            maxModelWidget._groupId = groupId;
+            maxModelWidget._isGroupWidget = true;
             
             // Max CLIP strength
-            const maxClipWidget = ComfyWidgets.FLOAT(this, "max_clip", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-            maxClipWidget.widget.name = `  Max CLIP`;
-            maxClipWidget.widget.value = 1.0;
-            maxClipWidget.widget.groupWidget = true;
-            maxClipWidget.widget.groupId = groupId;
-            maxClipWidget.widget.callback = () => {
-                group.max_clip = maxClipWidget.widget.value;
-                this.updateStackData();
-            };
-            group.widgets.push(maxClipWidget.widget);
+            const maxClipWidget = this.insertWidget(insertIdx + 3, "number", "  Max CLIP", 
+                groupData.max_clip,
+                (v) => {
+                    const group = this.loraState.groups.find(g => g.id === groupId);
+                    if (group) {
+                        group.max_clip = v;
+                        this.saveState();
+                    }
+                },
+                { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+            );
+            maxClipWidget._groupId = groupId;
+            maxClipWidget._isGroupWidget = true;
             
             // Add LoRA to group button
-            const addLoraBtn = this.addWidget("button", `  ➕ Add LoRA`, null, () => {
-                this.addLora(groupId);
-            });
-            addLoraBtn.groupWidget = true;
-            addLoraBtn.groupId = groupId;
-            group.widgets.push(addLoraBtn);
-            
-            // Move widgets to correct position
-            for (const widget of group.widgets) {
-                const currentIdx = this.widgets.indexOf(widget);
-                if (currentIdx > insertIdx) {
-                    this.widgets.splice(currentIdx, 1);
-                    this.widgets.splice(insertIdx, 0, widget);
-                }
-                insertIdx++;
-            }
-            
-            this.groups.push(group);
-            this.updateStackData();
-            this.setSize(this.computeSize());
+            const addLoraBtn = this.insertWidget(insertIdx + 4, "button", "  ➕ Add LoRA", null,
+                () => this.addLora(groupId)
+            );
+            addLoraBtn._groupId = groupId;
+            addLoraBtn._isGroupWidget = true;
         };
         
         /**
-         * Remove a group and all its LoRAs
+         * Remove a group
          */
         nodeType.prototype.removeGroup = function(groupId) {
-            const groupIdx = this.groups.findIndex(g => g.id === groupId);
-            if (groupIdx === -1) return;
+            // Find and remove from state
+            const groupIdx = this.loraState.groups.findIndex(g => g.id === groupId);
+            if (groupIdx < 0) return;
             
-            const group = this.groups[groupIdx];
+            const group = this.loraState.groups[groupIdx];
             
-            // Remove all LoRAs in this group
-            const groupLoRAs = this.loras.filter(l => l.group_id === groupId);
-            for (const lora of groupLoRAs) {
-                this.removeLora(lora.id, true);
+            // Remove all loras in this group
+            this.loraState.loras = this.loraState.loras.filter(l => l.group_id !== groupId);
+            
+            // Remove the group
+            this.loraState.groups.splice(groupIdx, 1);
+            
+            // Update indices
+            for (let i = 0; i < this.loraState.groups.length; i++) {
+                this.loraState.groups[i].index = i + 1;
             }
             
-            // Remove group widgets
-            for (const widget of group.widgets) {
-                const idx = this.widgets.indexOf(widget);
-                if (idx !== -1) {
-                    this.widgets.splice(idx, 1);
-                }
-            }
-            
-            // Remove group
-            this.groups.splice(groupIdx, 1);
-            
-            // Update group indices and labels
-            for (let i = 0; i < this.groups.length; i++) {
-                this.groups[i].index = i + 1;
-                const headerWidget = this.groups[i].widgets.find(w => w.name.includes('group_'));
-                if (headerWidget) {
-                    const collapsed = this.collapsedGroups.has(this.groups[i].id);
-                    headerWidget.name = `${collapsed ? '▶' : '▼'} group_${i + 1}`;
-                }
-            }
-            
-            this.updateStackData();
-            this.setSize(this.computeSize());
+            // Rebuild UI
+            this.rebuildUI();
+            this.saveState();
         };
         
         /**
-         * Toggle group collapse state
+         * Toggle group collapse
          */
         nodeType.prototype.toggleGroupCollapse = function(groupId) {
-            const group = this.groups.find(g => g.id === groupId);
-            if (!group) return;
-            
-            const wasCollapsed = this.collapsedGroups.has(groupId);
-            
-            if (wasCollapsed) {
+            if (this.collapsedGroups.has(groupId)) {
                 this.collapsedGroups.delete(groupId);
             } else {
                 this.collapsedGroups.add(groupId);
             }
             
-            // Update header button
-            const headerWidget = group.widgets.find(w => w.name.includes('group_'));
-            if (headerWidget) {
-                headerWidget.name = `${wasCollapsed ? '▼' : '▶'} group_${group.index}`;
-            }
-            
-            // Toggle visibility of group widgets (except header and remove button)
-            for (let i = 2; i < group.widgets.length; i++) {
-                const widget = group.widgets[i];
-                if (wasCollapsed) {
-                    delete widget.computeSize;
-                } else {
-                    widget.computeSize = () => [0, -4];
-                }
-            }
-            
-            // Toggle visibility of group LoRAs
-            const groupLoRAs = this.loras.filter(l => l.group_id === groupId);
-            for (const lora of groupLoRAs) {
-                for (const widget of lora.widgets) {
-                    if (wasCollapsed) {
-                        delete widget.computeSize;
-                    } else {
-                        widget.computeSize = () => [0, -4];
-                    }
-                }
-            }
-            
-            // Adjust size
-            this.setSize(this.computeSize());
+            // Rebuild UI to reflect collapse state
+            this.rebuildUI();
         };
         
         /**
-         * Add a LoRA (to a group or ungrouped)
+         * Add a LoRA
          */
         nodeType.prototype.addLora = function(groupId) {
             const loraId = this.nextLoraId++;
             
-            const lora = {
+            const loraData = {
                 id: loraId,
                 group_id: groupId,
                 name: "None",
-                preset: "Full",
-                widgets: []
+                preset: "Full"
             };
             
             if (groupId === null) {
-                // Ungrouped LoRA - full controls
-                lora.model_strength = 1.0;
-                lora.clip_strength = 1.0;
-                lora.random_model = false;
-                lora.min_model = 0.0;
-                lora.max_model = 1.0;
-                lora.random_clip = false;
-                lora.min_clip = 0.0;
-                lora.max_clip = 1.0;
+                // Ungrouped - add randomization fields
+                loraData.model_strength = 1.0;
+                loraData.clip_strength = 1.0;
+                loraData.random_model = false;
+                loraData.min_model = 0.0;
+                loraData.max_model = 1.0;
+                loraData.random_clip = false;
+                loraData.min_clip = 0.0;
+                loraData.max_clip = 1.0;
             } else {
-                // Grouped LoRA - lock controls
-                lora.lock_model = false;
-                lora.locked_model_value = 0.0;
-                lora.lock_clip = false;
-                lora.locked_clip_value = 0.0;
+                // Grouped - add lock fields
+                loraData.lock_model = false;
+                loraData.locked_model_value = 0.0;
+                loraData.lock_clip = false;
+                loraData.locked_clip_value = 0.0;
             }
             
-            // Find insertion index
-            let insertIdx;
-            if (groupId !== null) {
-                // Insert after group's add button or last LoRA in group
-                const group = this.groups.find(g => g.id === groupId);
-                if (!group) return;
-                
-                const addLoraBtn = group.widgets.find(w => w.name.includes('Add LoRA'));
-                insertIdx = this.widgets.indexOf(addLoraBtn) + 1;
-                
-                // Find last LoRA in this group
-                const groupLoRAs = this.loras.filter(l => l.group_id === groupId);
-                if (groupLoRAs.length > 0) {
-                    const lastLora = groupLoRAs[groupLoRAs.length - 1];
-                    const lastWidget = lastLora.widgets[lastLora.widgets.length - 1];
-                    insertIdx = this.widgets.indexOf(lastWidget) + 1;
-                }
-            } else {
-                // Insert before main buttons (at end)
-                const addLoraIdx = this.widgets.indexOf(this.addLoraButton);
-                insertIdx = addLoraIdx;
-                
-                // Find last ungrouped LoRA
-                const ungroupedLoras = this.loras.filter(l => l.group_id === null);
-                if (ungroupedLoras.length > 0) {
-                    const lastLora = ungroupedLoras[ungroupedLoras.length - 1];
-                    const lastWidget = lastLora.widgets[lastLora.widgets.length - 1];
-                    insertIdx = this.widgets.indexOf(lastWidget) + 1;
-                }
-            }
+            this.loraState.loras.push(loraData);
+            this.createLoraWidgets(loraId, groupId, loraData);
+            this.saveState();
+            this.setSize(this.computeSize());
+        };
+        
+        /**
+         * Create widgets for a LoRA
+         */
+        nodeType.prototype.createLoraWidgets = function(loraId, groupId, loraData) {
+            const insertIdx = this.getInsertIndexForLora(loraId, groupId);
+            const prefix = groupId ? "    " : "";
+            let widgetIdx = insertIdx;
             
-            // LoRA name selector with inline remove button
-            const loraWidget = this.addWidget("combo", groupId ? "    LoRA" : "LoRA", "None", (value) => {
-                lora.name = value;
-                this.updateStackData();
-            }, { values: availableLoRAs });
-            if (groupId) {
-                loraWidget.groupWidget = true;
-                loraWidget.groupId = groupId;
-            }
-            lora.widgets.push(loraWidget);
+            // LoRA selector
+            const loraWidget = this.insertWidget(widgetIdx++, "combo", 
+                `${prefix}LoRA`, 
+                loraData.name,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.name = v;
+                        this.saveState();
+                    }
+                },
+                { values: availableLoRAs }
+            );
+            loraWidget._loraId = loraId;
+            loraWidget._groupId = groupId;
             
-            // Remove button (small X button)
-            const removeBtn = this.addWidget("button", "✕", null, () => {
-                this.removeLora(loraId);
-            });
-            if (groupId) {
-                removeBtn.groupWidget = true;
-                removeBtn.groupId = groupId;
-            }
-            lora.widgets.push(removeBtn);
+            // Remove button
+            const removeBtn = this.insertWidget(widgetIdx++, "button", "✕", null,
+                () => this.removeLora(loraId)
+            );
+            removeBtn._loraId = loraId;
+            removeBtn._groupId = groupId;
             
             // Preset selector
-            const presetWidget = this.addWidget("combo", groupId ? "    Type" : "Type", "Full", (value) => {
-                lora.preset = value;
-                this.updateStackData();
-            }, { values: ["Full", "Character", "Style", "Concept", "Fix Hands"] });
-            if (groupId) {
-                presetWidget.groupWidget = true;
-                presetWidget.groupId = groupId;
-            }
-            lora.widgets.push(presetWidget);
+            const presetWidget = this.insertWidget(widgetIdx++, "combo",
+                `${prefix}Type`,
+                loraData.preset,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.preset = v;
+                        this.saveState();
+                    }
+                },
+                { values: ["Full", "Character", "Style", "Concept", "Fix Hands"] }
+            );
+            presetWidget._loraId = loraId;
+            presetWidget._groupId = groupId;
             
             if (groupId !== null) {
-                // ===== GROUPED LORA - LOCK CONTROLS =====
-                
-                // MODEL lock checkbox
-                const lockModelWidget = ComfyWidgets.BOOLEAN(this, "lock_model", ["BOOLEAN", {default: false}], app);
-                lockModelWidget.widget.name = "    🔒 MODEL";
-                lockModelWidget.widget.value = false;
-                lockModelWidget.widget.groupWidget = true;
-                lockModelWidget.widget.groupId = groupId;
-                lockModelWidget.widget.callback = (value) => {
-                    lora.lock_model = value;
-                    if (value) {
-                        lockedModelValueWidget.computeSize = undefined;
-                    } else {
-                        lockedModelValueWidget.computeSize = () => [0, -4];
-                    }
-                    this.updateStackData();
-                };
-                lora.widgets.push(lockModelWidget.widget);
-                
-                // Locked Model value input
-                const lockedModelValueWidget = ComfyWidgets.FLOAT(this, "locked_model_value", ["FLOAT", {default: 0.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                lockedModelValueWidget.widget.name = "      Value";
-                lockedModelValueWidget.widget.value = 0.0;
-                lockedModelValueWidget.widget.groupWidget = true;
-                lockedModelValueWidget.widget.groupId = groupId;
-                lockedModelValueWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                lockedModelValueWidget.widget.callback = (value) => {
-                    lora.locked_model_value = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(lockedModelValueWidget.widget);
-                
-                // CLIP lock checkbox
-                const lockClipWidget = ComfyWidgets.BOOLEAN(this, "lock_clip", ["BOOLEAN", {default: false}], app);
-                lockClipWidget.widget.name = "    🔒 CLIP";
-                lockClipWidget.widget.value = false;
-                lockClipWidget.widget.groupWidget = true;
-                lockClipWidget.widget.groupId = groupId;
-                lockClipWidget.widget.callback = (value) => {
-                    lora.lock_clip = value;
-                    if (value) {
-                        lockedClipValueWidget.computeSize = undefined;
-                    } else {
-                        lockedClipValueWidget.computeSize = () => [0, -4];
-                    }
-                    this.updateStackData();
-                };
-                lora.widgets.push(lockClipWidget.widget);
-                
-                // Locked CLIP value input
-                const lockedClipValueWidget = ComfyWidgets.FLOAT(this, "locked_clip_value", ["FLOAT", {default: 0.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                lockedClipValueWidget.widget.name = "      Value";
-                lockedClipValueWidget.widget.value = 0.0;
-                lockedClipValueWidget.widget.groupWidget = true;
-                lockedClipValueWidget.widget.groupId = groupId;
-                lockedClipValueWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                lockedClipValueWidget.widget.callback = (value) => {
-                    lora.locked_clip_value = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(lockedClipValueWidget.widget);
-                
+                // Grouped LoRA - lock controls
+                this.createGroupedLoraControls(widgetIdx, loraId, groupId, loraData);
             } else {
-                // ===== UNGROUPED LORA - FULL RANDOMIZATION CONTROLS =====
-                
-                // MODEL strength (fixed)
-                const modelStrWidget = ComfyWidgets.FLOAT(this, "model_strength", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                modelStrWidget.widget.name = "MODEL Str";
-                modelStrWidget.widget.value = 1.0;
-                modelStrWidget.widget.callback = (value) => {
-                    lora.model_strength = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(modelStrWidget.widget);
-                
-                // Random MODEL checkbox
-                const randomModelWidget = ComfyWidgets.BOOLEAN(this, "random_model", ["BOOLEAN", {default: false}], app);
-                randomModelWidget.widget.name = "  🎲 Random";
-                randomModelWidget.widget.value = false;
-                randomModelWidget.widget.callback = (value) => {
-                    lora.random_model = value;
-                    if (value) {
-                        minModelWidget.computeSize = undefined;
-                        maxModelWidget.computeSize = undefined;
-                    } else {
-                        minModelWidget.computeSize = () => [0, -4];
-                        maxModelWidget.computeSize = () => [0, -4];
-                    }
-                    this.updateStackData();
-                };
-                lora.widgets.push(randomModelWidget.widget);
-                
-                // Min MODEL
-                const minModelWidget = ComfyWidgets.FLOAT(this, "min_model", ["FLOAT", {default: 0.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                minModelWidget.widget.name = "    Min";
-                minModelWidget.widget.value = 0.0;
-                minModelWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                minModelWidget.widget.callback = (value) => {
-                    lora.min_model = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(minModelWidget.widget);
-                
-                // Max MODEL
-                const maxModelWidget = ComfyWidgets.FLOAT(this, "max_model", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                maxModelWidget.widget.name = "    Max";
-                maxModelWidget.widget.value = 1.0;
-                maxModelWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                maxModelWidget.widget.callback = (value) => {
-                    lora.max_model = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(maxModelWidget.widget);
-                
-                // CLIP strength (fixed)
-                const clipStrWidget = ComfyWidgets.FLOAT(this, "clip_strength", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                clipStrWidget.widget.name = "CLIP Str";
-                clipStrWidget.widget.value = 1.0;
-                clipStrWidget.widget.callback = (value) => {
-                    lora.clip_strength = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(clipStrWidget.widget);
-                
-                // Random CLIP checkbox
-                const randomClipWidget = ComfyWidgets.BOOLEAN(this, "random_clip", ["BOOLEAN", {default: false}], app);
-                randomClipWidget.widget.name = "  🎲 Random";
-                randomClipWidget.widget.value = false;
-                randomClipWidget.widget.callback = (value) => {
-                    lora.random_clip = value;
-                    if (value) {
-                        minClipWidget.computeSize = undefined;
-                        maxClipWidget.computeSize = undefined;
-                    } else {
-                        minClipWidget.computeSize = () => [0, -4];
-                        maxClipWidget.computeSize = () => [0, -4];
-                    }
-                    this.updateStackData();
-                };
-                lora.widgets.push(randomClipWidget.widget);
-                
-                // Min CLIP
-                const minClipWidget = ComfyWidgets.FLOAT(this, "min_clip", ["FLOAT", {default: 0.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                minClipWidget.widget.name = "    Min";
-                minClipWidget.widget.value = 0.0;
-                minClipWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                minClipWidget.widget.callback = (value) => {
-                    lora.min_clip = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(minClipWidget.widget);
-                
-                // Max CLIP
-                const maxClipWidget = ComfyWidgets.FLOAT(this, "max_clip", ["FLOAT", {default: 1.0, min: 0.0, max: 10.0, step: 0.01}], app);
-                maxClipWidget.widget.name = "    Max";
-                maxClipWidget.widget.value = 1.0;
-                maxClipWidget.widget.computeSize = () => [0, -4]; // Hidden by default
-                maxClipWidget.widget.callback = (value) => {
-                    lora.max_clip = value;
-                    this.updateStackData();
-                };
-                lora.widgets.push(maxClipWidget.widget);
+                // Ungrouped LoRA - full controls
+                this.createUngroupedLoraControls(widgetIdx, loraId, loraData);
             }
+        };
+        
+        /**
+         * Create controls for grouped LoRA (lock controls)
+         */
+        nodeType.prototype.createGroupedLoraControls = function(startIdx, loraId, groupId, loraData) {
+            let widgetIdx = startIdx;
             
-            // Move widgets to correct position
-            for (const widget of lora.widgets) {
-                const currentIdx = this.widgets.indexOf(widget);
-                if (currentIdx !== -1 && currentIdx !== insertIdx) {
-                    this.widgets.splice(currentIdx, 1);
-                    this.widgets.splice(insertIdx, 0, widget);
-                    insertIdx++;
-                } else {
-                    insertIdx++;
+            // MODEL lock checkbox
+            const lockModelWidget = this.insertWidget(widgetIdx++, "toggle",
+                "    🔒 MODEL",
+                loraData.lock_model,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.lock_model = v;
+                        this.rebuildUI();
+                        this.saveState();
+                    }
                 }
+            );
+            lockModelWidget._loraId = loraId;
+            lockModelWidget._groupId = groupId;
+            
+            // Locked MODEL value (only show if locked)
+            if (loraData.lock_model) {
+                const lockedModelValueWidget = this.insertWidget(widgetIdx++, "number",
+                    "      Value",
+                    loraData.locked_model_value,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.locked_model_value = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                lockedModelValueWidget._loraId = loraId;
+                lockedModelValueWidget._groupId = groupId;
             }
             
-            this.loras.push(lora);
-            this.updateStackData();
-            this.setSize(this.computeSize());
+            // CLIP lock checkbox
+            const lockClipWidget = this.insertWidget(widgetIdx++, "toggle",
+                "    🔒 CLIP",
+                loraData.lock_clip,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.lock_clip = v;
+                        this.rebuildUI();
+                        this.saveState();
+                    }
+                }
+            );
+            lockClipWidget._loraId = loraId;
+            lockClipWidget._groupId = groupId;
+            
+            // Locked CLIP value (only show if locked)
+            if (loraData.lock_clip) {
+                const lockedClipValueWidget = this.insertWidget(widgetIdx++, "number",
+                    "      Value",
+                    loraData.locked_clip_value,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.locked_clip_value = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                lockedClipValueWidget._loraId = loraId;
+                lockedClipValueWidget._groupId = groupId;
+            }
+        };
+        
+        /**
+         * Create controls for ungrouped LoRA (full controls)
+         */
+        nodeType.prototype.createUngroupedLoraControls = function(startIdx, loraId, loraData) {
+            let widgetIdx = startIdx;
+            
+            // MODEL strength
+            const modelStrWidget = this.insertWidget(widgetIdx++, "number",
+                "MODEL Str",
+                loraData.model_strength,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.model_strength = v;
+                        this.saveState();
+                    }
+                },
+                { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+            );
+            modelStrWidget._loraId = loraId;
+            
+            // Random MODEL toggle
+            const randomModelWidget = this.insertWidget(widgetIdx++, "toggle",
+                "  🎲 Random",
+                loraData.random_model,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.random_model = v;
+                        this.rebuildUI();
+                        this.saveState();
+                    }
+                }
+            );
+            randomModelWidget._loraId = loraId;
+            
+            // Min/Max MODEL (only show if random)
+            if (loraData.random_model) {
+                const minModelWidget = this.insertWidget(widgetIdx++, "number",
+                    "    Min",
+                    loraData.min_model,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.min_model = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                minModelWidget._loraId = loraId;
+                
+                const maxModelWidget = this.insertWidget(widgetIdx++, "number",
+                    "    Max",
+                    loraData.max_model,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.max_model = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                maxModelWidget._loraId = loraId;
+            }
+            
+            // CLIP strength
+            const clipStrWidget = this.insertWidget(widgetIdx++, "number",
+                "CLIP Str",
+                loraData.clip_strength,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.clip_strength = v;
+                        this.saveState();
+                    }
+                },
+                { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+            );
+            clipStrWidget._loraId = loraId;
+            
+            // Random CLIP toggle
+            const randomClipWidget = this.insertWidget(widgetIdx++, "toggle",
+                "  🎲 Random",
+                loraData.random_clip,
+                (v) => {
+                    const lora = this.loraState.loras.find(l => l.id === loraId);
+                    if (lora) {
+                        lora.random_clip = v;
+                        this.rebuildUI();
+                        this.saveState();
+                    }
+                }
+            );
+            randomClipWidget._loraId = loraId;
+            
+            // Min/Max CLIP (only show if random)
+            if (loraData.random_clip) {
+                const minClipWidget = this.insertWidget(widgetIdx++, "number",
+                    "    Min",
+                    loraData.min_clip,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.min_clip = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                minClipWidget._loraId = loraId;
+                
+                const maxClipWidget = this.insertWidget(widgetIdx++, "number",
+                    "    Max",
+                    loraData.max_clip,
+                    (v) => {
+                        const lora = this.loraState.loras.find(l => l.id === loraId);
+                        if (lora) {
+                            lora.max_clip = v;
+                            this.saveState();
+                        }
+                    },
+                    { min: 0.0, max: 10.0, step: 0.01, precision: 2 }
+                );
+                maxClipWidget._loraId = loraId;
+            }
         };
         
         /**
          * Remove a LoRA
          */
-        nodeType.prototype.removeLora = function(loraId, skipUpdate = false) {
-            const loraIdx = this.loras.findIndex(l => l.id === loraId);
-            if (loraIdx === -1) return;
+        nodeType.prototype.removeLora = function(loraId) {
+            const loraIdx = this.loraState.loras.findIndex(l => l.id === loraId);
+            if (loraIdx < 0) return;
             
-            const lora = this.loras[loraIdx];
-            
-            // Remove widgets
-            for (const widget of lora.widgets) {
-                const idx = this.widgets.indexOf(widget);
-                if (idx !== -1) {
-                    this.widgets.splice(idx, 1);
-                }
-            }
-            
-            // Remove lora
-            this.loras.splice(loraIdx, 1);
-            
-            if (!skipUpdate) {
-                this.updateStackData();
-                this.setSize(this.computeSize());
-            }
+            this.loraState.loras.splice(loraIdx, 1);
+            this.rebuildUI();
+            this.saveState();
         };
         
         /**
-         * Update stack_data hidden widget with current configuration
+         * Helper: Insert a widget at a specific index
          */
-        nodeType.prototype.updateStackData = function() {
-            if (!this.stackDataWidget) {
-                console.log("updateStackData: no stackDataWidget");
-                return;
+        nodeType.prototype.insertWidget = function(index, type, name, value, callback, options) {
+            let widget;
+            
+            if (type === "combo") {
+                widget = this.addWidget(type, name, value, callback, options);
+            } else if (type === "toggle") {
+                widget = ComfyWidgets.BOOLEAN(this, name, ["BOOLEAN", { default: value || false }], app).widget;
+                if (callback) {
+                    widget.callback = callback;
+                }
+            } else if (type === "number") {
+                widget = ComfyWidgets.FLOAT(this, name, ["FLOAT", { 
+                    default: value || 0, 
+                    min: options?.min ?? 0, 
+                    max: options?.max ?? 10, 
+                    step: options?.step ?? 0.01 
+                }], app).widget;
+                if (callback) {
+                    widget.callback = callback;
+                }
+            } else {
+                widget = this.addWidget(type, name, value, callback, options);
             }
             
-            // Skip update during restoration to prevent loops
-            if (this.isRestoring) {
-                console.log("updateStackData: skipping (isRestoring=true)");
-                return;
+            // Move to correct position
+            const currentIdx = this.widgets.indexOf(widget);
+            if (currentIdx !== index) {
+                this.widgets.splice(currentIdx, 1);
+                this.widgets.splice(index, 0, widget);
             }
             
-            console.log("updateStackData: updating with", this.groups.length, "groups and", this.loras.length, "loras");
-            
-            const data = {
-                groups: this.groups.map(g => ({
-                    id: g.id,
-                    index: g.index,
-                    max_model: g.max_model,
-                    max_clip: g.max_clip
-                })),
-                loras: this.loras.map(l => {
-                    const base = {
-                        id: l.id,
-                        group_id: l.group_id,
-                        name: l.name,
-                        preset: l.preset
-                    };
-                    
-                    if (l.group_id !== null) {
-                        // Grouped LoRA
-                        base.lock_model = l.lock_model;
-                        base.locked_model_value = l.locked_model_value;
-                        base.lock_clip = l.lock_clip;
-                        base.locked_clip_value = l.locked_clip_value;
-                    } else {
-                        // Ungrouped LoRA
-                        base.model_strength = l.model_strength;
-                        base.clip_strength = l.clip_strength;
-                        base.random_model = l.random_model;
-                        base.min_model = l.min_model;
-                        base.max_model = l.max_model;
-                        base.random_clip = l.random_clip;
-                        base.min_clip = l.min_clip;
-                        base.max_clip = l.max_clip;
-                    }
-                    
-                    return base;
-                })
-            };
-            
-            const jsonString = JSON.stringify(data);
-            this.stackDataWidget.value = jsonString;
-            console.log("updateStackData: set value to", jsonString.substring(0, 100) + "...");
+            return widget;
         };
         
         /**
-         * Validate stack_data for integrity
+         * Get insertion index for a group
          */
-        nodeType.prototype.validateStackData = function() {
-            if (!this.stackDataWidget || !this.stackDataWidget.value) {
-                return false;
-            }
-            
-            try {
-                const data = JSON.parse(this.stackDataWidget.value);
-                return data && (data.groups || data.loras);
-            } catch (e) {
-                console.error("Stack data validation failed:", e);
-                return false;
-            }
+        nodeType.prototype.getInsertIndexForGroup = function(groupId) {
+            // Insert after seed and stack_data, before action buttons
+            const seedIdx = this.widgets.findIndex(w => w.name === "seed");
+            return seedIdx + 2; // After seed and stack_data
         };
         
         /**
-         * Restore node state from stack_data hidden widget
+         * Get insertion index for a LoRA
          */
-        nodeType.prototype.restoreFromStackData = function() {
-            console.log("restoreFromStackData called");
-            
-            // Validate stack data first
-            if (!this.validateStackData()) {
-                console.log("Stack data validation failed or no data to restore");
-                return;
+        nodeType.prototype.getInsertIndexForLora = function(loraId, groupId) {
+            if (groupId !== null) {
+                // Insert after the group's "Add LoRA" button
+                const groupWidgets = this.widgets.filter(w => w._groupId === groupId && w._isGroupWidget);
+                if (groupWidgets.length > 0) {
+                    const lastGroupWidget = groupWidgets[groupWidgets.length - 1];
+                    const idx = this.widgets.indexOf(lastGroupWidget);
+                    return idx + 1;
+                }
+            } else {
+                // Insert before action buttons
+                const addLoraIdx = this.widgets.indexOf(this.addLoraButton);
+                return addLoraIdx;
             }
             
-            console.log("stackDataWidget.value:", this.stackDataWidget.value.substring(0, 100) + "...");
-            
-            let data;
-            try {
-                data = JSON.parse(this.stackDataWidget.value);
-            } catch (error) {
-                console.error("Failed to parse stack_data:", error);
-                return;
-            }
-            
-            const groups = data.groups || [];
-            const loras = data.loras || [];
-            
-            if (groups.length === 0 && loras.length === 0) {
-                console.log("No groups or loras to restore");
-                return;
-            }
-            
-            // Check if we've already restored this exact state (to prevent duplicate restoration)
-            const currentStateJson = JSON.stringify({groups, loras});
-            if (this._lastRestoredState === currentStateJson) {
-                console.log("State already restored, skipping duplicate restoration");
-                return;
-            }
-            this._lastRestoredState = currentStateJson;
-            
-            // If we already have groups or loras, clear them first to prevent duplicates
-            if (this.groups.length > 0 || this.loras.length > 0) {
-                console.log("Clearing existing state before restoration");
-                // Clear existing groups and loras
-                while (this.groups.length > 0) {
-                    this.removeGroup(this.groups[0].id);
-                }
-                while (this.loras.length > 0) {
-                    this.removeLora(this.loras[0].id, true);
-                }
-            }
-            
-            console.log("Restoring Advanced LoRA Stacker state:", groups.length, "groups,", loras.length, "loras");
-            
-            // Set restoration flag to prevent updateStackData from being called during restoration
-            this.isRestoring = true;
-            
-            // First, restore all groups
-            for (const groupData of groups) {
-                this.addGroup();
-                const group = this.groups[this.groups.length - 1];
-                
-                // Update group settings
-                group.max_model = groupData.max_model;
-                group.max_clip = groupData.max_clip;
-                
-                // Update widget values
-                const maxModelWidget = group.widgets.find(w => w.name === "  Max MODEL");
-                if (maxModelWidget) {
-                    maxModelWidget.value = groupData.max_model;
-                }
-                
-                const maxClipWidget = group.widgets.find(w => w.name === "  Max CLIP");
-                if (maxClipWidget) {
-                    maxClipWidget.value = groupData.max_clip;
-                }
-            }
-            
-            // Then, restore all LoRAs
-            for (const loraData of loras) {
-                // Find the group if this is a grouped LoRA
-                let targetGroupId = null;
-                if (loraData.group_id !== null && loraData.group_id !== undefined) {
-                    // Match by group ID from data
-                    const groupIndex = groups.findIndex(g => g.id === loraData.group_id);
-                    if (groupIndex !== -1 && this.groups[groupIndex]) {
-                        targetGroupId = this.groups[groupIndex].id;
-                    }
-                }
-                
-                this.addLora(targetGroupId);
-                const lora = this.loras[this.loras.length - 1];
-                
-                // Update LoRA settings
-                lora.name = loraData.name;
-                lora.preset = loraData.preset;
-                
-                // Update widget values
-                const nameWidget = lora.widgets.find(w => w.name === (targetGroupId ? "    LoRA" : "LoRA"));
-                if (nameWidget) {
-                    nameWidget.value = loraData.name;
-                }
-                
-                const presetWidget = lora.widgets.find(w => w.name === (targetGroupId ? "    Type" : "Type"));
-                if (presetWidget) {
-                    presetWidget.value = loraData.preset;
-                }
-                
-                if (targetGroupId !== null) {
-                    // Grouped LoRA - restore lock settings
-                    lora.lock_model = loraData.lock_model || false;
-                    lora.locked_model_value = loraData.locked_model_value || 0.0;
-                    lora.lock_clip = loraData.lock_clip || false;
-                    lora.locked_clip_value = loraData.locked_clip_value || 0.0;
-                    
-                    const lockModelWidget = lora.widgets.find(w => w.name === "    🔒 MODEL");
-                    const lockedModelValueWidget = lora.widgets.find(w => w.name === "      Value" && w === lora.widgets[lora.widgets.indexOf(lockModelWidget) + 1]);
-                    
-                    if (lockModelWidget) {
-                        lockModelWidget.value = lora.lock_model;
-                        if (lora.lock_model && lockedModelValueWidget) {
-                            lockedModelValueWidget.computeSize = undefined;
-                            lockedModelValueWidget.value = lora.locked_model_value;
-                        }
-                    }
-                    
-                    const lockClipWidget = lora.widgets.find(w => w.name === "    🔒 CLIP");
-                    const lockedClipValueWidget = lora.widgets.find(w => w.name === "      Value" && w === lora.widgets[lora.widgets.indexOf(lockClipWidget) + 1]);
-                    
-                    if (lockClipWidget) {
-                        lockClipWidget.value = lora.lock_clip;
-                        if (lora.lock_clip && lockedClipValueWidget) {
-                            lockedClipValueWidget.computeSize = undefined;
-                            lockedClipValueWidget.value = lora.locked_clip_value;
-                        }
-                    }
-                } else {
-                    // Ungrouped LoRA - restore randomization settings
-                    lora.model_strength = loraData.model_strength || 1.0;
-                    lora.clip_strength = loraData.clip_strength || 1.0;
-                    lora.random_model = loraData.random_model || false;
-                    lora.min_model = loraData.min_model || 0.0;
-                    lora.max_model = loraData.max_model || 1.0;
-                    lora.random_clip = loraData.random_clip || false;
-                    lora.min_clip = loraData.min_clip || 0.0;
-                    lora.max_clip = loraData.max_clip || 1.0;
-                    
-                    // Update widget values
-                    const modelStrWidget = lora.widgets.find(w => w.name === "MODEL Str");
-                    if (modelStrWidget) {
-                        modelStrWidget.value = lora.model_strength;
-                    }
-                    
-                    const randomModelWidget = lora.widgets.find(w => w.name === "  🎲 Random" && lora.widgets.indexOf(w) < 8);
-                    const minModelWidget = lora.widgets.find(w => w.name === "    Min" && lora.widgets.indexOf(w) < 8);
-                    const maxModelWidget = lora.widgets.find(w => w.name === "    Max" && lora.widgets.indexOf(w) < 8);
-                    
-                    if (randomModelWidget) {
-                        randomModelWidget.value = lora.random_model;
-                        if (lora.random_model) {
-                            if (minModelWidget) {
-                                minModelWidget.computeSize = undefined;
-                                minModelWidget.value = lora.min_model;
-                            }
-                            if (maxModelWidget) {
-                                maxModelWidget.computeSize = undefined;
-                                maxModelWidget.value = lora.max_model;
-                            }
-                        }
-                    }
-                    
-                    const clipStrWidget = lora.widgets.find(w => w.name === "CLIP Str");
-                    if (clipStrWidget) {
-                        clipStrWidget.value = lora.clip_strength;
-                    }
-                    
-                    const randomClipWidget = lora.widgets.find(w => w.name === "  🎲 Random" && lora.widgets.indexOf(w) > 8);
-                    const minClipWidget = lora.widgets.find(w => w.name === "    Min" && lora.widgets.indexOf(w) > 8);
-                    const maxClipWidget = lora.widgets.find(w => w.name === "    Max" && lora.widgets.indexOf(w) > 8);
-                    
-                    if (randomClipWidget) {
-                        randomClipWidget.value = lora.random_clip;
-                        if (lora.random_clip) {
-                            if (minClipWidget) {
-                                minClipWidget.computeSize = undefined;
-                                minClipWidget.value = lora.min_clip;
-                            }
-                            if (maxClipWidget) {
-                                maxClipWidget.computeSize = undefined;
-                                maxClipWidget.value = lora.max_clip;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Clear restoration flag
-            this.isRestoring = false;
-            
-            // Update the stack data to sync IDs (now that restoration is complete)
-            this.updateStackData();
-            
-            // Adjust node size
-            this.setSize(this.computeSize());
-            
-            console.log("Advanced LoRA Stacker state restored successfully");
+            return this.widgets.length - 2; // Before action buttons
         };
         
         /**
-         * Override computeSize to calculate proper node size
+         * Compute node size based on widgets
          */
         nodeType.prototype.computeSize = function(out) {
-            let height = 10; // Top padding
-            let maxWidth = 450;
+            let height = 60; // Base height
+            const width = 450;
             
-            // Calculate height based on all visible widgets
-            // Check if widgets array exists and is iterable
-            if (this.widgets && Array.isArray(this.widgets)) {
-                for (const widget of this.widgets) {
-                    if (widget.computeSize) {
-                        const size = widget.computeSize(maxWidth);
-                        if (size && size[1] > 0) {
-                            height += size[1] + 4;
-                        }
-                    } else if (!widget.type || widget.type !== "hidden") {
-                        // Standard widget height
-                        height += 34;
+            // Add height for each visible widget
+            for (const widget of this.widgets) {
+                if (widget.computeSize) {
+                    const size = widget.computeSize(width);
+                    if (size && size[1] > 0) {
+                        height += size[1] + 4;
                     }
+                } else if (widget.type !== "converted-widget") {
+                    height += 30; // Standard widget height
                 }
             }
             
-            height += 10; // Bottom padding
-            
-            const size = [maxWidth, Math.max(140, height)];
+            const size = [width, Math.max(140, height)];
             if (out) {
                 out[0] = size[0];
                 out[1] = size[1];
