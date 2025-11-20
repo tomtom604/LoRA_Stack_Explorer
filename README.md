@@ -331,19 +331,37 @@ Ungrouped LoRAs
 - Check that unlocked LoRAs exist in group
 - Review console output for assigned values
 
-### Node State Not Persisting
+### Node State Persistence
 
-**This issue has been fixed!** The node now properly saves and restores its state when:
-- Saving and loading workflows
-- Restarting ComfyUI server
-- Switching between workflows
+**Completely rewritten state management system (v2)!** The node now uses a simplified, robust approach to ensure state persists reliably:
 
-The node state (groups, LoRAs, and all settings) is automatically saved in the workflow JSON file. When you load a workflow, the node will recreate all groups and LoRAs exactly as you configured them.
+#### How It Works
+- **Dual Persistence**: State saved both in workflow JSON and browser localStorage
+- **Single Source of Truth**: All configuration stored in one simple state object
+- **Automatic Save**: State saves on every change (add/remove/modify)
+- **Smart Restore**: Loads from workflow JSON, with localStorage as fallback
 
-If you're still experiencing issues:
-- Make sure you're using the latest version of the node
-- Check browser console for any error messages during restoration
-- Verify your workflow file contains the `stack_data` field in the node's `widgets_values`
+#### What's Persisted
+✓ All groups and their max strength settings  
+✓ All LoRAs (grouped and ungrouped) and their configurations  
+✓ Lock states and locked values  
+✓ Randomization settings and min/max ranges  
+✓ Preset selections  
+✓ Group collapse states  
+
+#### Persistence Scenarios
+✓ Saving and loading workflows  
+✓ Browser refresh (even without saving)  
+✓ Restarting ComfyUI server  
+✓ Switching between workflows  
+✓ Copy/paste nodes (each gets independent state)  
+
+#### Troubleshooting
+If state doesn't persist:
+1. Check browser console for error messages (look for `[LoRA Stacker]` logs)
+2. Verify localStorage is enabled in your browser
+3. Check workflow JSON contains `stack_data` in node's `widgets_values`
+4. See `STATE_MANAGEMENT.md` for detailed debugging guide
 
 ## Contributing
 
@@ -462,6 +480,17 @@ Outputs:
 ---
 
 ## Changelog
+
+### v2.0.0 (State Management Rewrite)
+- **BREAKING**: Complete rewrite of state management system
+- **Fixed**: Persistent state now guaranteed across all scenarios
+- **Added**: Dual persistence (workflow JSON + localStorage)
+- **Added**: Comprehensive state management documentation
+- **Improved**: Simpler widget creation and management
+- **Improved**: Better error handling and validation
+- **Improved**: Extensive console logging for debugging
+- **Removed**: Complex serialization hooks that caused race conditions
+- **Note**: Old workflows will still load, but state structure is optimized
 
 ### v1.2.0 (Text Concatenator Node)
 - **Added**: New Text Concatenator node with dynamic infinite inputs
