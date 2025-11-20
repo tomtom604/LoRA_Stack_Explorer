@@ -80,7 +80,7 @@
       },
       "widgets_values": [
         12345,
-        "{\"groups\":[{\"id\":1,\"index\":1,\"max_model\":1.0,\"max_clip\":1.0}],\"loras\":[{\"id\":1,\"group_id\":1,\"name\":\"None\",\"preset\":\"Character\",\"lock_model\":false,\"locked_model_value\":0.0,\"lock_clip\":true,\"locked_clip_value\":0.5},{\"id\":2,\"group_id\":null,\"name\":\"None\",\"preset\":\"Style\",\"model_strength\":0.8,\"clip_strength\":0.8,\"random_model\":true,\"min_model\":0.5,\"max_model\":1.0,\"random_clip\":false,\"min_clip\":0.0,\"max_clip\":1.0}]}"
+        "{\"groups\":[{\"id\":1,\"index\":1,\"max_model\":1.0,\"max_clip\":1.0},{\"id\":2,\"index\":2,\"max_model\":0.8,\"max_clip\":0.8}],\"loras\":[{\"id\":1,\"group_id\":1,\"name\":\"character_lora.safetensors\",\"preset\":\"Character\",\"lock_model\":false,\"locked_model_value\":0.0,\"lock_clip\":true,\"locked_clip_value\":0.6},{\"id\":2,\"group_id\":1,\"name\":\"detail_lora.safetensors\",\"preset\":\"Character\",\"lock_model\":true,\"locked_model_value\":0.4,\"lock_clip\":false,\"locked_clip_value\":0.0},{\"id\":3,\"group_id\":2,\"name\":\"style_anime.safetensors\",\"preset\":\"Style\",\"lock_model\":false,\"locked_model_value\":0.0,\"lock_clip\":false,\"locked_clip_value\":0.0},{\"id\":4,\"group_id\":null,\"name\":\"hands_fix.safetensors\",\"preset\":\"Fix Hands\",\"model_strength\":0.7,\"clip_strength\":0.7,\"random_model\":true,\"min_model\":0.5,\"max_model\":0.9,\"random_clip\":false,\"min_clip\":0.0,\"max_clip\":1.0},{\"id\":5,\"group_id\":null,\"name\":\"quality_boost.safetensors\",\"preset\":\"Full\",\"model_strength\":0.5,\"clip_strength\":0.5,\"random_model\":false,\"min_model\":0.0,\"max_model\":1.0,\"random_clip\":true,\"min_clip\":0.3,\"max_clip\":0.7}]}"
       ]
     },
     {
@@ -112,6 +112,11 @@
   ],
   "groups": [],
   "config": {},
-  "extra": {},
+  "extra": {
+    "ds": {
+      "scale": 1.0,
+      "offset": [0, 0]
+    }
+  },
   "version": 0.4
 }
