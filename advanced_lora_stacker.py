@@ -168,13 +168,22 @@ class AdvancedLoraStacker:
         
         try:
             data = json.loads(stack_data)
-        except:
-            print("Invalid stack data")
+        except Exception as e:
+            print(f"Invalid stack data: {str(e)}")
+            print(f"Stack data preview: {stack_data[:100]}...")
             print("="*80 + "\n")
             return (model, clip, "Invalid configuration")
         
         groups = data.get("groups", [])
         loras = data.get("loras", [])
+        
+        # Validate data structure
+        if not isinstance(groups, list) or not isinstance(loras, list):
+            print("Invalid data structure: groups and loras must be lists")
+            print("="*80 + "\n")
+            return (model, clip, "Invalid configuration")
+        
+        print(f"Loaded configuration: {len(groups)} group(s), {len(loras)} LoRA(s)")
         
         info_lines = []
         
